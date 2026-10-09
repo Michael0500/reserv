@@ -86,3 +86,28 @@ a.desc:after {
 .form-group {
     margin-bottom: 1rem;
 }
+
+.reserve-table {
+    min-width: 1250px;
+}
+
+.reserve-table th {
+    white-space: normal;
+    vertical-align: middle;
+}
+
+.reserve-table .mb-3 {
+    margin-bottom: 0 !important;
+}
+
+.reserve-input {
+    min-width: 165px;
+}
+
+.reserve-date {
+    min-width: 165px;
+}
+
+.reserve-comment {
+    min-width: 240px;
+}
