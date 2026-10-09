@@ -2,6 +2,7 @@
 
 namespace app\controllers;
 
+use app\components\XlsxWriter;
 use app\models\CustomerSearchForm;
 use app\models\FccCheckClient;
 use app\models\ReserveReportForm;
@@ -26,6 +27,7 @@ class ReserveController extends Controller
                 'class' => VerbFilter::class,
                 'actions' => [
                     'save' => ['post'],
+                    'export' => ['post'],
                 ],
             ],
         ];
@@ -98,6 +100,59 @@ class ReserveController extends Controller
             'accounts' => $accounts,
             'searched' => true,
         ]);
+    }
+
+    public function actionExport()
+    {
+        $reportModel = new ReserveReportForm();
+        if (!$reportModel->load(Yii::$app->request->post()) || !$reportModel->validate()) {
+            $searchModel = new CustomerSearchForm();
+            return $this->render('index', [
+                'searchModel' => $searchModel,
+                'reportModel' => $reportModel,
+                'accounts' => [],
+                'searched' => false,
+            ]);
+        }
+
+        $accounts = FccCheckClient::find()
+            ->where(['between', 'application_date', $reportModel->dateFrom, $reportModel->dateTo])
+            ->orderBy(['customer' => SORT_ASC, 'system_ac_no' => SORT_ASC, 'id' => SORT_ASC])
+            ->all();
+
+        $filePath = tempnam(Yii::getAlias('@runtime'), 'reserve_report_');
+        if ($filePath === false) {
+            throw new \yii\web\ServerErrorHttpException('Не удалось подготовить файл отчёта.');
+        }
+
+        try {
+            (new XlsxWriter())->writeReserveReport(
+                $filePath,
+                $accounts,
+                $reportModel->dateFrom,
+                $reportModel->dateTo
+            );
+        } catch (\Throwable $exception) {
+            @unlink($filePath);
+            Yii::error($exception, __METHOD__);
+            throw new \yii\web\ServerErrorHttpException('Не удалось сформировать файл отчёта.');
+        }
+
+        $fileName = sprintf(
+            'reserve_report_%s_%s.xlsx',
+            $reportModel->dateFrom,
+            $reportModel->dateTo
+        );
+        $response = Yii::$app->response->sendFile($filePath, $fileName, [
+            'mimeType' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+        $response->on(Response::EVENT_AFTER_SEND, static function () use ($filePath) {
+            if (is_file($filePath)) {
+                unlink($filePath);
+            }
+        });
+
+        return $response;
     }
 
     private function findAccounts(string $customer): array

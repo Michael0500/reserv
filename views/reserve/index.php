@@ -102,14 +102,16 @@ $this->params['breadcrumbs'][] = $this->title;
     <div class="card">
         <div class="card-body">
             <h2 class="h5 card-title">Отчёт по резервам</h2>
-            <p class="text-muted mb-3">Выберите период. Выгрузка будет подключена после уточнения правил формирования отчёта.</p>
+            <p class="text-muted mb-3">В отчёт попадут операции, дата которых входит в выбранный период.</p>
             <?php $form = ActiveForm::begin([
+                'action' => ['export'],
+                'method' => 'post',
                 'options' => ['class' => 'row g-3 align-items-end'],
             ]); ?>
             <div class="col-sm-4 col-lg-3"><?= $form->field($reportModel, 'dateFrom')->input('date') ?></div>
             <div class="col-sm-4 col-lg-3"><?= $form->field($reportModel, 'dateTo')->input('date') ?></div>
             <div class="col-auto mb-3">
-                <?= Html::button('Выгрузить в Excel', ['class' => 'btn btn-outline-success', 'disabled' => true]) ?>
+                <?= Html::submitButton('Выгрузить в Excel', ['class' => 'btn btn-outline-success']) ?>
             </div>
             <?php ActiveForm::end(); ?>
         </div>
