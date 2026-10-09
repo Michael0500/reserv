@@ -119,6 +119,7 @@ class ReserveController extends Controller
             ->where(['between', 'application_date', $reportModel->dateFrom, $reportModel->dateTo])
             ->orderBy(['customer' => SORT_ASC, 'system_ac_no' => SORT_ASC, 'id' => SORT_ASC])
             ->all();
+        $summary = $this->buildCurrencySummary($reportModel->dateFrom, $reportModel->dateTo);
 
         $filePath = tempnam(Yii::getAlias('@runtime'), 'reserve_report_');
         if ($filePath === false) {
@@ -130,7 +131,8 @@ class ReserveController extends Controller
                 $filePath,
                 $accounts,
                 $reportModel->dateFrom,
-                $reportModel->dateTo
+                $reportModel->dateTo,
+                $summary
             );
         } catch (\Throwable $exception) {
             @unlink($filePath);
@@ -162,5 +164,50 @@ class ReserveController extends Controller
             ->orderBy(['system_ac_no' => SORT_ASC, 'id' => SORT_ASC])
             ->indexBy('id')
             ->all();
+    }
+
+    private function buildCurrencySummary(string $dateFrom, string $dateTo): array
+    {
+        $openingDate = (new \DateTimeImmutable($dateFrom))->modify('-1 day')->format('Y-m-d');
+        $rows = FccCheckClient::find()
+            ->select([
+                'currency',
+                'opening_transfers' => new \yii\db\Expression(
+                    'COALESCE(SUM(CASE WHEN application_date <= :openingDate THEN COALESCE(amount_transfer, 0) ELSE 0 END), 0)',
+                    [':openingDate' => $openingDate]
+                ),
+                'opening_returns' => new \yii\db\Expression(
+                    'COALESCE(SUM(CASE WHEN employee_date_sum <= :openingDate THEN COALESCE(employee_sum, 0) ELSE 0 END), 0)',
+                    [':openingDate' => $openingDate]
+                ),
+                'period_debits' => new \yii\db\Expression(
+                    'COALESCE(SUM(CASE WHEN application_date BETWEEN :dateFrom AND :dateTo THEN COALESCE(amount_transfer, 0) ELSE 0 END), 0)',
+                    [':dateFrom' => $dateFrom, ':dateTo' => $dateTo]
+                ),
+                'period_returns' => new \yii\db\Expression(
+                    'COALESCE(SUM(CASE WHEN employee_date_sum BETWEEN :dateFrom AND :dateTo THEN COALESCE(employee_sum, 0) ELSE 0 END), 0)',
+                    [':dateFrom' => $dateFrom, ':dateTo' => $dateTo]
+                ),
+            ])
+            ->where(['not', ['currency' => null]])
+            ->andWhere(['<>', 'currency', ''])
+            ->groupBy('currency')
+            ->orderBy(['currency' => SORT_ASC])
+            ->asArray()
+            ->all();
+
+        return array_map(static function (array $row): array {
+            $openingBalance = (float) $row['opening_transfers'] - (float) $row['opening_returns'];
+            $debit = (float) $row['period_debits'];
+            $return = (float) $row['period_returns'];
+
+            return [
+                'currency' => $row['currency'],
+                'opening_balance' => $openingBalance,
+                'debit' => $debit,
+                'return' => $return,
+                'closing_balance' => $openingBalance + $debit - $return,
+            ];
+        }, $rows);
     }
 }

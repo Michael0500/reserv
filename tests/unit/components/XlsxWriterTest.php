@@ -25,7 +25,23 @@ class XlsxWriterTest extends \Codeception\Test\Unit
                 $filePath,
                 [$account],
                 '2026-01-01',
-                '2026-01-31'
+                '2026-01-31',
+                [
+                    [
+                        'currency' => 'RUB',
+                        'opening_balance' => 5,
+                        'debit' => 10.5,
+                        'return' => 2,
+                        'closing_balance' => 13.5,
+                    ],
+                    [
+                        'currency' => 'USD',
+                        'opening_balance' => 3,
+                        'debit' => 0,
+                        'return' => 1,
+                        'closing_balance' => 2,
+                    ],
+                ]
             );
 
             $zip = new ZipArchive();
@@ -34,6 +50,11 @@ class XlsxWriterTest extends \Codeception\Test\Unit
             verify($worksheet)->stringContainsString('00000001');
             verify($worksheet)->stringContainsString('40817810111111100000');
             verify($worksheet)->stringContainsString('Расшифровка за период');
+            verify($worksheet)->stringContainsString('Сводный отчёт');
+            verify($worksheet)->stringContainsString('RUB');
+            verify($worksheet)->stringContainsString('USD');
+            verify($worksheet)->stringContainsString('<f>B8+E8-F8</f>');
+            verify(simplexml_load_string($worksheet))->notEmpty();
             verify($zip->getFromName('xl/styles.xml'))->notEmpty();
             $zip->close();
         } finally {

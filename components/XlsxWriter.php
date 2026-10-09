@@ -11,7 +11,13 @@ use ZipArchive;
  */
 class XlsxWriter
 {
-    public function writeReserveReport(string $filePath, array $accounts, string $dateFrom, string $dateTo): void
+    public function writeReserveReport(
+        string $filePath,
+        array $accounts,
+        string $dateFrom,
+        string $dateTo,
+        array $summary = []
+    ): void
     {
         if (!class_exists(ZipArchive::class)) {
             throw new RuntimeException('Для формирования XLSX требуется PHP-расширение zip.');
@@ -32,14 +38,14 @@ class XlsxWriter
             $zip->addFromString('xl/styles.xml', $this->styles());
             $zip->addFromString(
                 'xl/worksheets/sheet1.xml',
-                $this->worksheet($accounts, $dateFrom, $dateTo)
+                $this->worksheet($accounts, $dateFrom, $dateTo, $summary)
             );
         } finally {
             $zip->close();
         }
     }
 
-    private function worksheet(array $accounts, string $dateFrom, string $dateTo): string
+    private function worksheet(array $accounts, string $dateFrom, string $dateTo, array $summary): string
     {
         $title = sprintf(
             'Расшифровка за период с %s по %s',
@@ -82,7 +88,61 @@ class XlsxWriter
             $rowNumber++;
         }
 
-        $lastRow = max(2, $rowNumber - 1);
+        $detailLastRow = max(2, $rowNumber - 1);
+        $summaryTitleRow = $detailLastRow + 2;
+        $summaryHeaderRow = $summaryTitleRow + 1;
+        $summarySubheaderRow = $summaryHeaderRow + 1;
+        $summaryDataRow = $summarySubheaderRow + 1;
+
+        $rows[] = '<row r="' . $summaryTitleRow . '" ht="24" customHeight="1">'
+            . $this->textCell(
+                'A' . $summaryTitleRow,
+                sprintf(
+                    'Сводный отчёт с %s по %s',
+                    $this->displayDate($dateFrom),
+                    $this->displayDate($dateTo)
+                ),
+                1
+            )
+            . '</row>';
+        $rows[] = '<row r="' . $summaryHeaderRow . '" ht="30" customHeight="1">'
+            . $this->textCell('A' . $summaryHeaderRow, 'Валюта', 2)
+            . $this->textCell('B' . $summaryHeaderRow, 'Остаток резерва на начало периода', 2)
+            . $this->textCell('E' . $summaryHeaderRow, 'Оборот за период', 2)
+            . $this->textCell('G' . $summaryHeaderRow, 'Остаток резерва на конец периода', 2)
+            . '</row>';
+        $rows[] = '<row r="' . $summarySubheaderRow . '" ht="30" customHeight="1">'
+            . $this->textCell('E' . $summarySubheaderRow, 'Списание (+)', 2)
+            . $this->textCell('F' . $summarySubheaderRow, 'Возврат (-)', 2)
+            . '</row>';
+
+        $mergeCells = [
+            'A1:G1',
+            'A' . $summaryTitleRow . ':G' . $summaryTitleRow,
+            'A' . $summaryHeaderRow . ':A' . $summarySubheaderRow,
+            'B' . $summaryHeaderRow . ':D' . $summarySubheaderRow,
+            'E' . $summaryHeaderRow . ':F' . $summaryHeaderRow,
+            'G' . $summaryHeaderRow . ':G' . $summarySubheaderRow,
+        ];
+
+        foreach ($summary as $item) {
+            $closingFormula = 'B' . $summaryDataRow . '+E' . $summaryDataRow . '-F' . $summaryDataRow;
+            $rows[] = '<row r="' . $summaryDataRow . '" ht="22" customHeight="1">'
+                . $this->textCell('A' . $summaryDataRow, $item['currency'], 3)
+                . $this->numberCell('B' . $summaryDataRow, $item['opening_balance'], 4)
+                . $this->numberCell('E' . $summaryDataRow, $item['debit'], 4)
+                . $this->numberCell('F' . $summaryDataRow, $item['return'], 4)
+                . $this->formulaCell('G' . $summaryDataRow, $closingFormula, $item['closing_balance'], 4)
+                . '</row>';
+            $mergeCells[] = 'B' . $summaryDataRow . ':D' . $summaryDataRow;
+            $summaryDataRow++;
+        }
+
+        $lastRow = max($summarySubheaderRow, $summaryDataRow - 1);
+        $mergeXml = '';
+        foreach ($mergeCells as $range) {
+            $mergeXml .= '<mergeCell ref="' . $range . '"/>';
+        }
 
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
@@ -99,8 +159,8 @@ class XlsxWriter
             . '<col min="7" max="7" width="14" customWidth="1"/>'
             . '</cols>'
             . '<sheetData>' . implode('', $rows) . '</sheetData>'
-            . '<autoFilter ref="A2:G' . $lastRow . '"/>'
-            . '<mergeCells count="1"><mergeCell ref="A1:G1"/></mergeCells>'
+            . '<autoFilter ref="A2:G' . $detailLastRow . '"/>'
+            . '<mergeCells count="' . count($mergeCells) . '">' . $mergeXml . '</mergeCells>'
             . '<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
             . '</worksheet>';
     }
@@ -122,6 +182,13 @@ class XlsxWriter
         return '<c r="' . $reference . '" s="' . $style . '"><v>'
             . $this->escape((string) (float) $value)
             . '</v></c>';
+    }
+
+    private function formulaCell(string $reference, string $formula, $value, int $style): string
+    {
+        return '<c r="' . $reference . '" s="' . $style . '"><f>'
+            . $this->escape($formula)
+            . '</f><v>' . $this->escape((string) (float) $value) . '</v></c>';
     }
 
     private function dateCell(string $reference, $value): string
@@ -181,6 +248,7 @@ class XlsxWriter
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
             . '<sheets><sheet name="Резервы" sheetId="1" r:id="rId1"/></sheets>'
+            . '<calcPr calcId="191029" fullCalcOnLoad="1" forceFullCalc="1"/>'
             . '</workbook>';
     }
 
